@@ -216,7 +216,7 @@ impl WorkspaceClient for Client {
         });
     }
 
-    fn focus_window(&self, _id: String) {
+    fn focus_window(&self, _workspace_id: i64, _id: String) {
         // The Niri backend does not emit per-workspace window icons
         // (WorkspaceUpdate::Windows), so this is never called in practice.
         warn!("focus_window is not supported on the Niri backend");

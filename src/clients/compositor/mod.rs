@@ -263,10 +263,15 @@ pub trait WorkspaceClient: Debug + Send + Sync {
 
     /// Requests the window with this id (compositor address) is focused.
     ///
+    /// `workspace_id` is the workspace the window lives on, so the compositor
+    /// can bring that workspace onto the monitor the icon was clicked on before
+    /// focusing (matching a per-monitor taskbar's expectation), rather than
+    /// jumping to the window's home monitor.
+    ///
     /// Used by the workspaces module's per-workspace window icons. Only
     /// meaningful on compositors that emit [`WorkspaceUpdate::Windows`]
     /// (currently Hyprland); other backends may no-op.
-    fn focus_window(&self, id: String);
+    fn focus_window(&self, workspace_id: i64, id: String);
 
     /// Creates a new to workspace event receiver.
     fn subscribe(&self) -> broadcast::Receiver<WorkspaceUpdate>;

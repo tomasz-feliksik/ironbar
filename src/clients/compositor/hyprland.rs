@@ -509,15 +509,30 @@ impl super::WorkspaceClient for Client {
             // Hyprland Lua config mode: the legacy dispatch protocol is not
             // eval-able by the Lua runtime, so fall back to the structured
             // hl.dsp API via `hyprctl eval`.
-            dispatch_lua(&format!("hl.dsp.focus({{ workspace = {id} }})"));
+            eval_lua(&format!("hl.dispatch(hl.dsp.focus({{ workspace = {id} }}))"));
         }
     }
 
-    fn focus_window(&self, id: String) {
-        let identifier = WindowIdentifier::Address(Address::new(id.clone()));
+    fn focus_window(&self, workspace_id: i64, id: String) {
+        // Bring the window's workspace onto the monitor the icon was clicked on
+        // FIRST, then focus the window — focusing the window alone ignores the
+        // current monitor and jumps to the window's home monitor.
+        let ws = workspace_id.to_string();
+        let native = Dispatch::call(DispatchType::Custom(
+            "focusworkspaceoncurrentmonitor",
+            &ws,
+        ))
+        .and_then(|()| {
+            Dispatch::call(DispatchType::FocusWindow(WindowIdentifier::Address(
+                Address::new(id.clone()),
+            )))
+        });
 
-        if Dispatch::call(DispatchType::FocusWindow(identifier)).is_err() {
-            dispatch_lua(&format!("hl.dsp.focus({{ window = \"address:{id}\" }})"));
+        if native.is_err() {
+            eval_lua(&format!(
+                "hl.dispatch(hl.dsp.focus({{ workspace = {workspace_id}, on_current_monitor = true }})); \
+                 hl.dispatch(hl.dsp.focus({{ window = \"address:{id}\" }}))"
+            ));
         }
     }
 
@@ -608,16 +623,16 @@ impl BindModeClient for Client {
     }
 }
 
-/// Dispatches via `hyprctl eval` using Hyprland's structured Lua API.
+/// Evaluates a Lua snippet via `hyprctl eval`.
 ///
 /// Fallback for Hyprland's Lua config mode, where the legacy dispatch protocol
-/// hyprland-rs uses is not eval-able by the Lua runtime. `dispatcher` is the
-/// `hl.dsp` call, e.g. `hl.dsp.focus({ workspace = 3 })`.
+/// hyprland-rs uses is not eval-able by the Lua runtime. `lua` is a complete
+/// statement using the structured API, e.g.
+/// `hl.dispatch(hl.dsp.focus({ workspace = 3 }))`.
 #[cfg(feature = "workspaces+hyprland")]
-fn dispatch_lua(dispatcher: &str) {
-    let lua = format!("hl.dispatch({dispatcher})");
+fn eval_lua(lua: &str) {
     match std::process::Command::new("hyprctl")
-        .args(["eval", &lua])
+        .args(["eval", lua])
         .output()
     {
         // hyprctl eval reports Lua errors on stdout with a zero exit code,
