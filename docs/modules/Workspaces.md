@@ -22,6 +22,9 @@ Shows all current workspaces. Clicking a workspace changes focus to it.
 | `format.unnamed` | `string`                                    | `"{label}"` | The format string for unnamed workspaces.                                                                                                                                 |
 | `all_monitors`   | `boolean`                                   | `false`     | Whether to display workspaces from all monitors. When `false`, only shows workspaces on the current monitor.                                                              |
 | `sort`           | `'added'`, `'index'`, `'label'` or `'name'` | `label`     | The method used for sorting workspaces. `added` always appends to the end, `index` sorts by workspace index, `label` sorts by displayed value, and `name` sorts by workspace name.                          |
+| `show_window_icons`   | `boolean`                              | `false`     | Whether to render an icon for each window open on a workspace, inside that workspace's button (a per-workspace taskbar). Clicking an icon focuses that window; the focused window's icon gets the `.focused` class. **Only supported on Hyprland**; a no-op elsewhere. |
+| `window_icon_size`    | `integer`                              | `16`        | Size to render window icons at (only when `show_window_icons`).                                                                                                          |
+| `dedupe_window_icons` | `boolean`                              | `false`     | Collapse multiple windows of the same application to a single icon (only when `show_window_icons`).                                                                       |
 
 ## Formatting
 
@@ -127,5 +130,9 @@ end:
 | `.workspaces .item .icon`      | Workspace button icon (any type)                        |
 | `.workspaces .item .text-icon` | Workspace button icon (textual only)                    |
 | `.workspaces .item .image`     | Workspace button icon (image only)                      |
+| `.workspaces .item .workspace-content` | Box wrapping the label + window icons (when `show_window_icons`) |
+| `.workspaces .item .workspace-windows` | Box holding the per-window icons (when `show_window_icons`)      |
+| `.workspaces .item .window-icon`         | A single per-window app icon (when `show_window_icons`)          |
+| `.workspaces .item .window-icon.focused` | The icon of the currently focused window (when `show_window_icons`) |
 
 For more information on styling, please see the [styling guide](styling-guide).

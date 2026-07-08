@@ -170,6 +170,29 @@ pub struct WorkspacesModule {
     #[serde(default)]
     format: Format,
 
+    /// Whether to render an icon for each window open on a workspace,
+    /// inside that workspace's button (a per-workspace taskbar).
+    ///
+    /// > [!NOTE]
+    /// > Only supported on Hyprland. A no-op on other compositors.
+    ///
+    /// **Default**: `false`
+    #[serde(default)]
+    show_window_icons: bool,
+
+    /// The size to render window icons at (only when `show_window_icons`).
+    ///
+    /// **Default**: `16`
+    #[serde(default = "default_window_icon_size")]
+    window_icon_size: i32,
+
+    /// Collapse multiple windows of the same application to a single icon
+    /// (only when `show_window_icons`).
+    ///
+    /// **Default**: `false`
+    #[serde(default)]
+    dedupe_window_icons: bool,
+
     // -- Common --
     /// See [layout options](module-level-options#layout)
     #[serde(default, flatten)]
@@ -184,6 +207,10 @@ fn default_format() -> String {
     "{label}".to_string()
 }
 
+fn default_window_icon_size() -> i32 {
+    16
+}
+
 impl Default for WorkspacesModule {
     fn default() -> Self {
         Self {
@@ -194,10 +221,22 @@ impl Default for WorkspacesModule {
             sort: SortOrder::default(),
             icon_size: default::IconSize::Normal as i32,
             format: Format::default(),
+            show_window_icons: false,
+            window_icon_size: default_window_icon_size(),
+            dedupe_window_icons: false,
             layout: LayoutConfig::default(),
             common: Some(CommonConfig::default()),
         }
     }
+}
+
+/// A UI-originated request handled by the workspaces controller.
+#[derive(Debug, Clone)]
+pub enum WorkspaceMessage {
+    /// Focus a workspace by id (workspace button click).
+    FocusWorkspace(i64),
+    /// Focus a window by compositor address (window icon click).
+    FocusWindow(String),
 }
 
 #[derive(Debug, Clone)]
@@ -205,9 +244,12 @@ pub struct WorkspaceItemContext {
     name_map: HashMap<String, String>,
     icon_size: i32,
     image_provider: image::Provider,
-    tx: mpsc::Sender<i64>,
+    tx: mpsc::Sender<WorkspaceMessage>,
     format_named: String,
     format_unnamed: String,
+    show_window_icons: bool,
+    window_icon_size: i32,
+    dedupe_window_icons: bool,
 }
 
 impl WorkspaceItemContext {
@@ -277,7 +319,7 @@ fn reorder_workspaces(container: &gtk::Box, sort_order: SortOrder) {
 
 impl Module<gtk::Box> for WorkspacesModule {
     type SendMessage = WorkspaceUpdate;
-    type ReceiveMessage = i64;
+    type ReceiveMessage = WorkspaceMessage;
 
     module_impl!("workspaces");
 
@@ -303,12 +345,15 @@ impl Module<gtk::Box> for WorkspacesModule {
 
         let client = context.try_client::<dyn WorkspaceClient>()?;
 
-        // Change workspace focus
+        // Handle UI focus requests (workspace buttons and window icons).
         spawn(async move {
             trace!("Setting up UI event handler");
 
-            while let Some(id) = rx.recv().await {
-                client.focus(id);
+            while let Some(message) = rx.recv().await {
+                match message {
+                    WorkspaceMessage::FocusWorkspace(id) => client.focus(id),
+                    WorkspaceMessage::FocusWindow(id) => client.focus_window(id),
+                }
             }
 
             Ok::<(), Report>(())
@@ -335,6 +380,9 @@ impl Module<gtk::Box> for WorkspacesModule {
             tx: context.controller_tx.clone(),
             format_named,
             format_unnamed,
+            show_window_icons: self.show_window_icons,
+            window_icon_size: self.window_icon_size,
+            dedupe_window_icons: self.dedupe_window_icons,
         };
 
         // setup favorites
@@ -540,6 +588,15 @@ impl Module<gtk::Box> for WorkspacesModule {
                             .or_else(|| button_map.find_button_by_id(id))
                         {
                             button.set_urgent(urgent);
+                        }
+                    }
+                    WorkspaceUpdate::Windows { id, windows } if has_initialized => {
+                        if self.show_window_icons
+                            && let Some(button) = button_map
+                                .get(&Identifier::Id(id))
+                                .or_else(|| button_map.find_button_by_id(id))
+                        {
+                            button.set_windows(&windows);
                         }
                     }
                     WorkspaceUpdate::Unknown if has_initialized => {

@@ -3,12 +3,15 @@ use super::{BindModeClient, BindModeUpdate};
 #[cfg(feature = "keyboard+hyprland")]
 use super::{KeyboardLayoutClient, KeyboardLayoutUpdate};
 use super::{Visibility, Workspace};
+#[cfg(feature = "workspaces+hyprland")]
+use super::WorkspaceWindow;
 use crate::channels::SyncSenderExt;
 use crate::{arc_mut, lock, spawn_blocking};
 use hyprland::Result;
 use hyprland::ctl::switch_xkb_layout;
 use hyprland::data::{Devices, Workspace as HWorkspace, Workspaces};
-use hyprland::dispatch::{Dispatch, DispatchType, WorkspaceIdentifierWithSpecial};
+use hyprland::dispatch::{Dispatch, DispatchType, WindowIdentifier, WorkspaceIdentifierWithSpecial};
+use hyprland::shared::Address;
 use hyprland::event_listener::EventListener;
 use hyprland::prelude::*;
 use hyprland::shared::{HyprDataVec, WorkspaceType};
@@ -282,6 +285,100 @@ impl Client {
                 );
             });
         }
+
+        // Window open/close/move: re-snapshot windows-per-workspace so the
+        // workspaces module can refresh per-workspace icons. A no-op for the
+        // module unless `show_window_icons` is enabled.
+        {
+            let tx = tx.clone();
+            let lock = lock.clone();
+            event_listener.add_window_opened_handler(move |data| {
+                let _lock = lock!(lock);
+                debug!("Received window open: {data:?}");
+                Self::send_window_snapshot(&tx);
+            });
+        }
+
+        {
+            let tx = tx.clone();
+            let lock = lock.clone();
+            event_listener.add_window_closed_handler(move |address| {
+                let _lock = lock!(lock);
+                debug!("Received window close: {address:?}");
+                Self::send_window_snapshot(&tx);
+            });
+        }
+
+        {
+            let tx = tx.clone();
+            let lock = lock.clone();
+            event_listener.add_window_moved_handler(move |data| {
+                let _lock = lock!(lock);
+                debug!("Received window move: {data:?}");
+                Self::send_window_snapshot(&tx);
+            });
+        }
+
+        // Active-window change: re-snapshot so the focused window's icon
+        // highlight follows focus, not just window open/close/move.
+        {
+            let tx = tx.clone();
+            let lock = lock.clone();
+            event_listener.add_active_window_changed_handler(move |data| {
+                let _lock = lock!(lock);
+                debug!("Received active window change: {data:?}");
+                Self::send_window_snapshot(&tx);
+            });
+        }
+    }
+
+    /// Snapshots all open windows, buckets them by workspace, and emits a
+    /// [`WorkspaceUpdate::Windows`] event for every current workspace.
+    ///
+    /// Empty workspaces get an empty vec so their icons clear. Two IPC calls
+    /// per invocation — acceptable at window-event frequency for a status bar.
+    #[cfg(feature = "workspaces+hyprland")]
+    fn send_window_snapshot(tx: &Sender<WorkspaceUpdate>) {
+        use std::collections::HashMap;
+
+        let clients = match hyprland::data::Clients::get() {
+            Ok(clients) => clients,
+            Err(err) => {
+                error!("Failed to get clients for window snapshot: {err}");
+                return;
+            }
+        };
+
+        // The currently focused window, so its icon can be highlighted.
+        let active_address = hyprland::data::Client::get_active()
+            .ok()
+            .flatten()
+            .map(|c| c.address.to_string());
+
+        let mut by_workspace: HashMap<i64, Vec<WorkspaceWindow>> = HashMap::new();
+        for client in clients.iter() {
+            let id = client.address.to_string();
+            let focused = active_address.as_deref() == Some(id.as_str());
+            by_workspace
+                .entry(client.workspace.id as i64)
+                .or_default()
+                .push(WorkspaceWindow {
+                    id,
+                    app_id: client.class.clone(),
+                    focused,
+                });
+        }
+
+        match Workspaces::get() {
+            Ok(workspaces) => {
+                for workspace in workspaces {
+                    let id = workspace.id as i64;
+                    let windows = by_workspace.remove(&id).unwrap_or_default();
+                    tx.send_expect(WorkspaceUpdate::Windows { id, windows });
+                }
+            }
+            Err(err) => error!("Failed to get workspaces for window snapshot: {err}"),
+        }
     }
 
     #[cfg(feature = "keyboard+hyprland")]
@@ -413,6 +510,14 @@ impl super::WorkspaceClient for Client {
         }
     }
 
+    fn focus_window(&self, id: String) {
+        let identifier = WindowIdentifier::Address(Address::new(id.clone()));
+
+        if let Err(e) = Dispatch::call(DispatchType::FocusWindow(identifier)) {
+            error!("Couldn't focus window '{id}': {e:#}");
+        }
+    }
+
     fn subscribe(&self) -> Receiver<WorkspaceUpdate> {
         let rx = self.workspace.tx.subscribe();
 
@@ -432,6 +537,9 @@ impl super::WorkspaceClient for Client {
                 self.workspace
                     .tx
                     .send_expect(WorkspaceUpdate::Init(workspaces));
+
+                // Seed the initial per-workspace window icons.
+                Self::send_window_snapshot(&self.workspace.tx);
             }
             Err(e) => {
                 error!("Failed to get workspaces: {e:#}");

@@ -216,6 +216,12 @@ impl WorkspaceClient for Client {
         });
     }
 
+    fn focus_window(&self, _id: String) {
+        // The Niri backend does not emit per-workspace window icons
+        // (WorkspaceUpdate::Windows), so this is never called in practice.
+        warn!("focus_window is not supported on the Niri backend");
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<WorkspaceUpdate> {
         let rx = self.tx.subscribe();
 
