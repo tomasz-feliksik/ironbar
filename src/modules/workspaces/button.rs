@@ -100,7 +100,13 @@ impl Button {
         }
 
         for icon in resolve_window_icons(windows, self.dedupe_window_icons) {
-            let picture = Picture::builder().content_fit(ContentFit::ScaleDown).build();
+            let picture = Picture::builder()
+                .content_fit(ContentFit::ScaleDown)
+                // Don't shrink below the requested size: on a narrow bar with
+                // many icons GTK would otherwise compress each Picture down to
+                // a few pixels ("dots"). Keeps icons full size on every monitor.
+                .can_shrink(false)
+                .build();
             picture.add_css_class("window-icon");
             picture.set_size_request(self.window_icon_size, self.window_icon_size);
             // Center rather than fill so the box doesn't stretch the icon (and
