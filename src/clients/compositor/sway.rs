@@ -37,6 +37,12 @@ impl super::WorkspaceClient for Client {
         });
     }
 
+    fn focus_window(&self, _id: String) {
+        // The Sway backend does not emit per-workspace window icons
+        // (WorkspaceUpdate::Windows), so this is never called in practice.
+        tracing::warn!("focus_window is not supported on the Sway backend");
+    }
+
     fn subscribe(&self) -> Receiver<WorkspaceUpdate> {
         let (tx, rx) = channel(16);
 
