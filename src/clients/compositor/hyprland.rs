@@ -509,7 +509,7 @@ impl super::WorkspaceClient for Client {
             // Hyprland Lua config mode: the legacy dispatch protocol is not
             // eval-able by the Lua runtime, so fall back to the structured
             // hl.dsp API via `hyprctl eval`.
-            eval_lua(&format!("hl.dispatch(hl.dsp.focus({{ workspace = {id} }}))"));
+            eval_lua(&focus_workspace_lua(id));
         }
     }
 
@@ -529,10 +529,7 @@ impl super::WorkspaceClient for Client {
         });
 
         if native.is_err() {
-            eval_lua(&format!(
-                "hl.dispatch(hl.dsp.focus({{ workspace = {workspace_id}, on_current_monitor = true }})); \
-                 hl.dispatch(hl.dsp.focus({{ window = \"address:{id}\" }}))"
-            ));
+            eval_lua(&focus_window_lua(workspace_id, &id));
         }
     }
 
@@ -623,6 +620,22 @@ impl BindModeClient for Client {
     }
 }
 
+/// Builds the Lua to focus a workspace, for the Lua-config-mode fallback.
+#[cfg(feature = "workspaces+hyprland")]
+fn focus_workspace_lua(id: i64) -> String {
+    format!("hl.dispatch(hl.dsp.focus({{ workspace = {id} }}))")
+}
+
+/// Builds the Lua to focus a window: bring its workspace onto the current
+/// monitor, then focus the window. For the Lua-config-mode fallback.
+#[cfg(feature = "workspaces+hyprland")]
+fn focus_window_lua(workspace_id: i64, address: &str) -> String {
+    format!(
+        "hl.dispatch(hl.dsp.focus({{ workspace = {workspace_id}, on_current_monitor = true }})); \
+         hl.dispatch(hl.dsp.focus({{ window = \"address:{address}\" }}))"
+    )
+}
+
 /// Evaluates a Lua snippet via `hyprctl eval`.
 ///
 /// Fallback for Hyprland's Lua config mode, where the legacy dispatch protocol
@@ -689,5 +702,27 @@ where
         } else {
             Self::Hidden
         }
+    }
+}
+
+#[cfg(all(test, feature = "workspaces+hyprland"))]
+mod tests {
+    use super::{focus_window_lua, focus_workspace_lua};
+
+    #[test]
+    fn focus_workspace_lua_builds_dispatch() {
+        assert_eq!(
+            focus_workspace_lua(4),
+            "hl.dispatch(hl.dsp.focus({ workspace = 4 }))"
+        );
+    }
+
+    #[test]
+    fn focus_window_lua_moves_workspace_to_current_monitor_then_focuses() {
+        assert_eq!(
+            focus_window_lua(4, "0x55c0"),
+            "hl.dispatch(hl.dsp.focus({ workspace = 4, on_current_monitor = true })); \
+             hl.dispatch(hl.dsp.focus({ window = \"address:0x55c0\" }))"
+        );
     }
 }
