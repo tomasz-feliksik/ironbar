@@ -7,7 +7,7 @@ use crate::modules::workspaces::{WorkspaceItemContext, WorkspaceMessage};
 use glib::signal::SignalHandlerId;
 use gtk::Button as GtkButton;
 use gtk::prelude::*;
-use gtk::{ContentFit, Orientation, Picture};
+use gtk::{Align, ContentFit, Orientation, Picture};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -103,6 +103,10 @@ impl Button {
             let picture = Picture::builder().content_fit(ContentFit::ScaleDown).build();
             picture.add_css_class("window-icon");
             picture.set_size_request(self.window_icon_size, self.window_icon_size);
+            // Center rather than fill so the box doesn't stretch the icon (and
+            // its background tile) vertically — keeps the tile square.
+            picture.set_valign(Align::Center);
+            picture.set_halign(Align::Center);
             if icon.focused {
                 picture.add_css_class("focused");
             }
