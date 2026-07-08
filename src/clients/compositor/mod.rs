@@ -154,6 +154,22 @@ pub struct Workspace {
     pub visibility: Visibility,
 }
 
+/// A single window (client) open on a workspace.
+///
+/// Emitted via [`WorkspaceUpdate::Windows`] so the workspaces module can
+/// optionally render an app icon per open window inside the workspace button.
+#[derive(Debug, Clone)]
+#[cfg(feature = "workspaces")]
+pub struct WorkspaceWindow {
+    /// Compositor-unique window identifier (e.g. Hyprland address),
+    /// used to focus the window when its icon is clicked.
+    pub id: String,
+    /// Application id / window class, used to resolve an icon.
+    pub app_id: String,
+    /// Whether this is the currently focused (active) window.
+    pub focused: bool,
+}
+
 /// Indicates workspace visibility.
 /// Visible workspaces have a boolean flag to indicate if they are also focused.
 #[derive(Debug, Copy, Clone)]
@@ -214,6 +230,16 @@ pub enum WorkspaceUpdate {
         urgent: bool,
     },
 
+    /// The set of windows open on a workspace changed.
+    ///
+    /// Only emitted by compositors that can map windows to workspaces
+    /// (currently Hyprland). Consumers that do not render window icons
+    /// can safely ignore this.
+    Windows {
+        id: i64,
+        windows: Vec<WorkspaceWindow>,
+    },
+
     /// An update was triggered by the compositor but this was not mapped by Ironbar.
     ///
     /// This is purely used for ergonomics within the compositor clients
@@ -234,6 +260,13 @@ pub struct BindModeUpdate {
 pub trait WorkspaceClient: Debug + Send + Sync {
     /// Requests the workspace with this id is focused.
     fn focus(&self, id: i64);
+
+    /// Requests the window with this id (compositor address) is focused.
+    ///
+    /// Used by the workspaces module's per-workspace window icons. Only
+    /// meaningful on compositors that emit [`WorkspaceUpdate::Windows`]
+    /// (currently Hyprland); other backends may no-op.
+    fn focus_window(&self, id: String);
 
     /// Creates a new to workspace event receiver.
     fn subscribe(&self) -> broadcast::Receiver<WorkspaceUpdate>;
