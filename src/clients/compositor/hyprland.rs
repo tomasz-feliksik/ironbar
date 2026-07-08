@@ -505,16 +505,19 @@ impl super::WorkspaceClient for Client {
     fn focus(&self, id: i64) {
         let identifier = WorkspaceIdentifierWithSpecial::Id(id as i32);
 
-        if let Err(e) = Dispatch::call(DispatchType::Workspace(identifier)) {
-            error!("Couldn't focus workspace '{id}': {e:#}");
+        if Dispatch::call(DispatchType::Workspace(identifier)).is_err() {
+            // Hyprland Lua config mode: the legacy dispatch protocol is not
+            // eval-able by the Lua runtime, so fall back to the structured
+            // hl.dsp API via `hyprctl eval`.
+            dispatch_lua(&format!("hl.dsp.focus({{ workspace = {id} }})"));
         }
     }
 
     fn focus_window(&self, id: String) {
         let identifier = WindowIdentifier::Address(Address::new(id.clone()));
 
-        if let Err(e) = Dispatch::call(DispatchType::FocusWindow(identifier)) {
-            error!("Couldn't focus window '{id}': {e:#}");
+        if Dispatch::call(DispatchType::FocusWindow(identifier)).is_err() {
+            dispatch_lua(&format!("hl.dsp.focus({{ window = \"address:{id}\" }})"));
         }
     }
 
@@ -602,6 +605,30 @@ impl KeyboardLayoutClient for Client {
 impl BindModeClient for Client {
     fn subscribe(&self) -> super::Result<Receiver<BindModeUpdate>> {
         Ok(self.bindmode.tx.subscribe())
+    }
+}
+
+/// Dispatches via `hyprctl eval` using Hyprland's structured Lua API.
+///
+/// Fallback for Hyprland's Lua config mode, where the legacy dispatch protocol
+/// hyprland-rs uses is not eval-able by the Lua runtime. `dispatcher` is the
+/// `hl.dsp` call, e.g. `hl.dsp.focus({ workspace = 3 })`.
+#[cfg(feature = "workspaces+hyprland")]
+fn dispatch_lua(dispatcher: &str) {
+    let lua = format!("hl.dispatch({dispatcher})");
+    match std::process::Command::new("hyprctl")
+        .args(["eval", &lua])
+        .output()
+    {
+        // hyprctl eval reports Lua errors on stdout with a zero exit code,
+        // so inspect the output rather than trusting the status alone.
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if !out.status.success() || stdout.trim_start().starts_with("error") {
+                error!("hyprctl eval '{lua}' failed: {}", stdout.trim());
+            }
+        }
+        Err(e) => error!("failed to run hyprctl for '{lua}': {e}"),
     }
 }
 
