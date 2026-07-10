@@ -24,6 +24,14 @@ pub struct Button {
     image_provider: image::Provider,
     window_icon_size: i32,
     dedupe_window_icons: bool,
+    /// Last window list applied via [`set_windows`](Self::set_windows), retained
+    /// so a focus change can recompute the highlight in place without a full
+    /// re-snapshot. Empty when window icons are disabled.
+    windows: Vec<WorkspaceWindow>,
+    /// The per-window icon pictures in the order they were appended — parallel
+    /// to `resolve_window_icons(&self.windows, dedupe)` — so the focused class
+    /// can be toggled in place. Rebuilt on every `set_windows`.
+    window_icons: Vec<Picture>,
 }
 
 impl Button {
@@ -80,6 +88,8 @@ impl Button {
             image_provider: context.image_provider.clone(),
             window_icon_size: context.window_icon_size,
             dedupe_window_icons: context.dedupe_window_icons,
+            windows: Vec::new(),
+            window_icons: Vec::new(),
         };
 
         btn.apply_open_state();
@@ -90,14 +100,21 @@ impl Button {
     ///
     /// A no-op unless `show_window_icons` was enabled (i.e. `windows_box` is
     /// present). Optionally deduplicates by application id.
-    pub fn set_windows(&self, windows: &[WorkspaceWindow]) {
-        let Some(windows_box) = self.windows_box.as_ref() else {
+    pub fn set_windows(&mut self, windows: &[WorkspaceWindow]) {
+        // Own the box handle (a cheap GTK refcount bump) so `self` is free to
+        // mutate the retained window/picture state below.
+        let Some(windows_box) = self.windows_box.clone() else {
             return;
         };
 
         while let Some(child) = windows_box.first_child() {
             windows_box.remove(&child);
         }
+
+        // Retain the window list and picture handles so a later focus change can
+        // recompute the highlight in place (see `set_focused_window`).
+        self.windows = windows.to_vec();
+        self.window_icons.clear();
 
         for icon in resolve_window_icons(windows, self.dedupe_window_icons) {
             let picture = Picture::builder()
@@ -145,6 +162,31 @@ impl Button {
                     .load_into_picture_silent(&app_id, size, true, &pic)
                     .await;
             });
+
+            self.window_icons.push(picture);
+        }
+    }
+
+    /// Updates the focused-window highlight in place, for a
+    /// [`WorkspaceUpdate::WindowFocusChanged`](crate::clients::compositor::WorkspaceUpdate::WindowFocusChanged).
+    ///
+    /// Cheaper than a full [`set_windows`](Self::set_windows), and — crucially —
+    /// it does not rebuild the per-icon `GestureClick` closures, so the window
+    /// addresses they dispatch stay pinned to the last real snapshot instead of
+    /// being churned on every focus change (the source of the stale-click bug).
+    /// `active` is the newly-focused window's address, or `None` if focus left
+    /// every window on this workspace.
+    pub fn set_focused_window(&self, active: Option<&str>) {
+        for (picture, icon) in self.window_icons.iter().zip(focus_icons(
+            &self.windows,
+            active,
+            self.dedupe_window_icons,
+        )) {
+            if icon.focused {
+                picture.add_css_class("focused");
+            } else {
+                picture.remove_css_class("focused");
+            }
         }
     }
 
@@ -270,9 +312,31 @@ fn resolve_window_icons(windows: &[WorkspaceWindow], dedupe: bool) -> Vec<Resolv
     icons
 }
 
+/// Re-resolves the window icons with the focus flags recomputed for a new
+/// active window. Pure core of [`Button::set_focused_window`].
+///
+/// A window is focused iff its address equals `active`; icons are then resolved
+/// exactly as [`resolve_window_icons`] does — so with dedupe on, focusing a
+/// window that was collapsed into another app's icon still highlights that icon
+/// ("any window of the app is focused"), which a bare address comparison misses.
+fn focus_icons(
+    windows: &[WorkspaceWindow],
+    active: Option<&str>,
+    dedupe: bool,
+) -> Vec<ResolvedIcon> {
+    let windows: Vec<WorkspaceWindow> = windows
+        .iter()
+        .map(|w| WorkspaceWindow {
+            focused: Some(w.id.as_str()) == active,
+            ..w.clone()
+        })
+        .collect();
+    resolve_window_icons(&windows, dedupe)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve_window_icons;
+    use super::{focus_icons, resolve_window_icons};
     use crate::clients::compositor::WorkspaceWindow;
 
     fn win(app: &str, addr: &str, focused: bool) -> WorkspaceWindow {
@@ -313,5 +377,38 @@ mod tests {
         assert!(icons[0].focused);
         assert_eq!(icons[1].app_id, "kitty");
         assert!(!icons[1].focused);
+    }
+
+    #[test]
+    fn focus_icons_highlights_only_the_active_window_without_dedupe() {
+        let windows = vec![
+            win("firefox", "0x1", true),
+            win("firefox", "0x2", false),
+            win("kitty", "0x3", false),
+        ];
+        // Focus moves to the second firefox window; its icon lights up, the
+        // previously focused one clears.
+        let icons = focus_icons(&windows, Some("0x2"), false);
+        assert!(!icons[0].focused);
+        assert!(icons[1].focused);
+        assert!(!icons[2].focused);
+    }
+
+    #[test]
+    fn focus_icons_highlights_deduped_icon_for_a_collapsed_window() {
+        let windows = vec![win("firefox", "0x1", false), win("firefox", "0x2", false)];
+        // The active window (0x2) was collapsed into the first firefox icon;
+        // that single icon must still highlight.
+        let icons = focus_icons(&windows, Some("0x2"), true);
+        assert_eq!(icons.len(), 1);
+        assert_eq!(icons[0].address, "0x1");
+        assert!(icons[0].focused);
+    }
+
+    #[test]
+    fn focus_icons_clears_all_when_focus_leaves_every_window() {
+        let windows = vec![win("firefox", "0x1", true), win("kitty", "0x2", false)];
+        let icons = focus_icons(&windows, None, false);
+        assert!(icons.iter().all(|i| !i.focused));
     }
 }
