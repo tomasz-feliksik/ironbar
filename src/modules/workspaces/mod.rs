@@ -595,16 +595,19 @@ impl Module<gtk::Box> for WorkspacesModule {
                             button.set_urgent(urgent);
                         }
                     }
-                    WorkspaceUpdate::Windows { id, windows } if has_initialized => {
+                    WorkspaceUpdate::Windows(snapshot) if has_initialized => {
                         if self.show_window_icons {
-                            let button =
-                                if let Some(button) = button_map.get_mut(&Identifier::Id(id)) {
+                            for (id, windows) in &snapshot {
+                                let button = if let Some(button) =
+                                    button_map.get_mut(&Identifier::Id(*id))
+                                {
                                     Some(button)
                                 } else {
-                                    button_map.find_button_by_id_mut(id)
+                                    button_map.find_button_by_id_mut(*id)
                                 };
-                            if let Some(button) = button {
-                                button.set_windows(&windows);
+                                if let Some(button) = button {
+                                    button.set_windows(windows);
+                                }
                             }
                         }
                     }

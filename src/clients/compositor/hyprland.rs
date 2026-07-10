@@ -339,8 +339,9 @@ impl Client {
         }
     }
 
-    /// Snapshots all open windows, buckets them by workspace, and emits a
-    /// [`WorkspaceUpdate::Windows`] event for every current workspace.
+    /// Snapshots all open windows, buckets them by workspace, and emits a single
+    /// atomic [`WorkspaceUpdate::Windows`] event covering every current
+    /// workspace.
     ///
     /// Empty workspaces get an empty vec so their icons clear. Two IPC calls
     /// per invocation — acceptable at window-event frequency for a status bar.
@@ -378,11 +379,15 @@ impl Client {
 
         match Workspaces::get() {
             Ok(workspaces) => {
-                for workspace in workspaces {
-                    let id = workspace.id as i64;
-                    let windows = by_workspace.remove(&id).unwrap_or_default();
-                    tx.send_expect(WorkspaceUpdate::Windows { id, windows });
-                }
+                let snapshot = workspaces
+                    .into_iter()
+                    .map(|workspace| {
+                        let id = workspace.id as i64;
+                        let windows = by_workspace.remove(&id).unwrap_or_default();
+                        (id, windows)
+                    })
+                    .collect();
+                tx.send_expect(WorkspaceUpdate::Windows(snapshot));
             }
             Err(err) => error!("Failed to get workspaces for window snapshot: {err}"),
         }
