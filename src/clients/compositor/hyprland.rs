@@ -648,16 +648,26 @@ fn eval_lua(lua: &str) {
         .args(["eval", lua])
         .output()
     {
-        // hyprctl eval reports Lua errors on stdout with a zero exit code,
-        // so inspect the output rather than trusting the status alone.
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            if !out.status.success() || stdout.trim_start().starts_with("error") {
+            if is_eval_lua_failure(out.status.success(), &stdout) {
                 error!("hyprctl eval '{lua}' failed: {}", stdout.trim());
             }
         }
         Err(e) => error!("failed to run hyprctl for '{lua}': {e}"),
     }
+}
+
+/// Decides whether `hyprctl eval` output signals a failed dispatch.
+///
+/// A successful dispatch prints exactly `ok`. Hyprland reports a *failed*
+/// dispatch as `warning: … hl.focus: window not found` on stdout with a zero
+/// exit code, and reserves `error:` for Lua *syntax* errors — so trusting the
+/// exit status, or matching only an `error` prefix, silently swallows every
+/// real dispatch failure. Treat anything that is not `ok` as a failure.
+#[cfg(feature = "workspaces+hyprland")]
+fn is_eval_lua_failure(status_success: bool, stdout: &str) -> bool {
+    !(status_success && stdout.trim() == "ok")
 }
 
 fn get_workspace_name(name: WorkspaceType) -> String {
@@ -707,7 +717,33 @@ where
 
 #[cfg(all(test, feature = "workspaces+hyprland"))]
 mod tests {
-    use super::{focus_window_lua, focus_workspace_lua};
+    use super::{focus_window_lua, focus_workspace_lua, is_eval_lua_failure};
+
+    #[test]
+    fn ok_output_is_not_a_failure() {
+        assert!(!is_eval_lua_failure(true, "ok"));
+        assert!(!is_eval_lua_failure(true, "ok\n"));
+    }
+
+    #[test]
+    fn warning_output_is_a_failure() {
+        // A failed dispatch: exit 0, but stdout is a warning, not `ok`.
+        assert!(is_eval_lua_failure(
+            true,
+            "warning: =[C]:-1: hl.focus: window not found\n"
+        ));
+    }
+
+    #[test]
+    fn error_output_is_a_failure() {
+        // A Lua syntax error: still reported on stdout with a zero exit code.
+        assert!(is_eval_lua_failure(true, "error: ')' expected near '3'"));
+    }
+
+    #[test]
+    fn nonzero_exit_is_a_failure_even_when_stdout_says_ok() {
+        assert!(is_eval_lua_failure(false, "ok"));
+    }
 
     #[test]
     fn focus_workspace_lua_builds_dispatch() {
