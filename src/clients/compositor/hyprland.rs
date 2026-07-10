@@ -36,7 +36,22 @@ struct TxRx<T> {
 }
 impl<T: Clone> TxRx<T> {
     fn new() -> Self {
-        let (tx, rx) = channel(16);
+        // Broadcast capacity. This is slack for scheduler jitter, NOT the
+        // correctness guarantee: a `broadcast` channel drops the oldest messages
+        // under lag, and for the workspaces module a dropped `Windows` snapshot
+        // leaves a button's icons — and the addresses their click closures
+        // captured — stale. What actually bounds the risk is that each
+        // compositor event now costs a *single* message: focus changes send one
+        // lightweight `WindowFocusChanged` rather than re-snapshotting every
+        // workspace (see `add_active_window_changed_handler`), and a full
+        // snapshot is one atomic `Windows` message rather than one per workspace
+        // (see `send_window_snapshot`). A subscriber must therefore fall dozens
+        // of distinct events behind to lag at all. If `Channel lagged` warnings
+        // ever reappear, the fix is not a bigger buffer (it only widens the
+        // window) but resync-on-lag — re-requesting a snapshot on `Lagged`,
+        // since the module's state is a pure function of the latest snapshot.
+        // See beads ironbar-cvz.5.
+        let (tx, rx) = channel(32);
         Self { tx, _rx: rx }
     }
 }
