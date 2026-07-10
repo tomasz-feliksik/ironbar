@@ -332,15 +332,22 @@ impl Client {
             });
         }
 
-        // Active-window change: re-snapshot so the focused window's icon
-        // highlight follows focus, not just window open/close/move.
+        // Active-window change: emit a lightweight focus update so the icon
+        // highlight follows focus. A focus change never alters which windows
+        // sit on which workspace — only which is highlighted — so a full
+        // re-snapshot (2 IPC calls + one broadcast message per workspace) would
+        // be the dominant, and least justified, source of channel traffic, and
+        // clicking an icon itself triggers a focus change (a self-reinforcing
+        // loop). The event already carries the new active address, so this
+        // costs no IPC. See beads ironbar-cvz.3.
         {
             let tx = tx.clone();
             let lock = lock.clone();
             event_listener.add_active_window_changed_handler(move |data| {
                 let _lock = lock!(lock);
                 debug!("Received active window change: {data:?}");
-                Self::send_window_snapshot(&tx);
+                let address = data.map(|d| d.address.to_string());
+                tx.send_expect(WorkspaceUpdate::WindowFocusChanged { address });
             });
         }
     }

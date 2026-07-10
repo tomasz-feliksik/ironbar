@@ -240,6 +240,21 @@ pub enum WorkspaceUpdate {
         windows: Vec<WorkspaceWindow>,
     },
 
+    /// The active (focused) window changed, without the set of windows itself
+    /// changing.
+    ///
+    /// Carries the newly-focused window's address, or `None` when focus left
+    /// every mapped window. Lets consumers update the focused-icon highlight in
+    /// place instead of re-snapshotting every workspace on each focus change —
+    /// the re-snapshot floods the broadcast channel and can drop the
+    /// [`Windows`](Self::Windows) messages that keep icon click targets fresh.
+    ///
+    /// Only emitted by compositors that map windows to workspaces (currently
+    /// Hyprland), like [`Windows`](Self::Windows).
+    WindowFocusChanged {
+        address: Option<String>,
+    },
+
     /// An update was triggered by the compositor but this was not mapped by Ironbar.
     ///
     /// This is purely used for ergonomics within the compositor clients
