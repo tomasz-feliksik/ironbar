@@ -104,6 +104,27 @@ impl Client {
         self.client.items()
     }
 
+    /// Looks up the cached dbusmenu object path for a tray item, as learned
+    /// from its `MenuConnect` event. Needed to address an `AboutToShow` call.
+    pub fn menu_path(&self, address: &str) -> Option<String> {
+        lock!(self.menus)
+            .get(address)
+            .map(|entry| entry.path.clone())
+    }
+
+    /// Sends dbusmenu `AboutToShow` for a menu item (id `0` = the root menu),
+    /// prompting the app to publish a fresh layout if one is pending.
+    pub async fn about_to_show_menuitem(
+        &self,
+        address: String,
+        menu_path: String,
+        id: i32,
+    ) -> system_tray::error::Result<bool> {
+        self.client
+            .about_to_show_menuitem(address, menu_path, id)
+            .await
+    }
+
     pub async fn activate(&self, req: ActivateRequest) -> system_tray::error::Result<()> {
         self.client.activate(req).await
     }

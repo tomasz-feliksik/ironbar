@@ -1,3 +1,4 @@
+mod diff;
 mod icon;
 mod interface;
 
@@ -185,7 +186,14 @@ impl Default for TrayModule {
 }
 
 pub enum UiEvent {
-    Menu(bool),
+    /// The popup menu was opened (`open = true`) or closed. On open we ask the
+    /// item to refresh its layout via dbusmenu `AboutToShow`, so a menu whose
+    /// item ids the app has since reassigned is re-fetched before the user can
+    /// click a now-stale entry. `address` identifies which tray item.
+    Menu {
+        open: bool,
+        address: String,
+    },
     Activate(ActivateRequest),
 }
 
@@ -248,7 +256,20 @@ impl Module<gtk::Box> for TrayModule {
         spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    UiEvent::Menu(open) => {
+                    UiEvent::Menu { open, address } => {
+                        // dbusmenu hosts should call AboutToShow(0) when opening
+                        // the root menu; it prompts apps (e.g. ksni) that rebuild
+                        // and reassign item ids to publish a fresh layout, which
+                        // arrives as an UpdateEvent::Menu and rebuilds the widget.
+                        if open && let Some(path) = client.menu_path(&address) {
+                            match client.about_to_show_menuitem(address, path, 0).await {
+                                Ok(needs_update) => {
+                                    trace!("about_to_show reported needs_update={needs_update}");
+                                }
+                                Err(err) => error!("about_to_show request failed: {err:?}"),
+                            }
+                        }
+
                         tx.send_expect(ModuleUpdateEvent::LockVisible(open)).await;
                     }
                     UiEvent::Activate(action) => {
@@ -498,6 +519,7 @@ fn on_update(
                 }
                 UpdateEvent::MenuDiff(diff) => {
                     trace!("received menu diff {diff:?}");
+                    menu_item.apply_menu_diff(&diff);
                 }
             }
         }
