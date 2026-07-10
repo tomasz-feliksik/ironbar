@@ -230,15 +230,18 @@ pub enum WorkspaceUpdate {
         urgent: bool,
     },
 
-    /// The set of windows open on a workspace changed.
+    /// A full snapshot of every workspace's open windows, as one atomic message.
+    ///
+    /// Each entry pairs a workspace id with its current window list (empty when
+    /// the workspace has no windows, so its icons clear). Sent as a single
+    /// broadcast rather than one message per workspace, so a burst costs one
+    /// channel slot instead of N and a dropped message can never leave one
+    /// workspace's icons newer than another's.
     ///
     /// Only emitted by compositors that can map windows to workspaces
     /// (currently Hyprland). Consumers that do not render window icons
     /// can safely ignore this.
-    Windows {
-        id: i64,
-        windows: Vec<WorkspaceWindow>,
-    },
+    Windows(Vec<(i64, Vec<WorkspaceWindow>)>),
 
     /// The active (focused) window changed, without the set of windows itself
     /// changing.
