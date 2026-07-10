@@ -1,19 +1,21 @@
+#[cfg(feature = "workspaces+hyprland")]
+use super::WorkspaceWindow;
 #[cfg(feature = "bindmode+hyprland")]
 use super::{BindModeClient, BindModeUpdate};
 #[cfg(feature = "keyboard+hyprland")]
 use super::{KeyboardLayoutClient, KeyboardLayoutUpdate};
 use super::{Visibility, Workspace};
-#[cfg(feature = "workspaces+hyprland")]
-use super::WorkspaceWindow;
 use crate::channels::SyncSenderExt;
 use crate::{arc_mut, lock, spawn_blocking};
 use hyprland::Result;
 use hyprland::ctl::switch_xkb_layout;
 use hyprland::data::{Devices, Workspace as HWorkspace, Workspaces};
-use hyprland::dispatch::{Dispatch, DispatchType, WindowIdentifier, WorkspaceIdentifierWithSpecial};
-use hyprland::shared::Address;
+use hyprland::dispatch::{
+    Dispatch, DispatchType, WindowIdentifier, WorkspaceIdentifierWithSpecial,
+};
 use hyprland::event_listener::EventListener;
 use hyprland::prelude::*;
+use hyprland::shared::Address;
 use hyprland::shared::{HyprDataVec, WorkspaceType};
 use tokio::sync::broadcast::{Receiver, Sender, channel};
 use tracing::{debug, error, info, warn};
@@ -545,15 +547,12 @@ impl super::WorkspaceClient for Client {
         // FIRST, then focus the window — focusing the window alone ignores the
         // current monitor and jumps to the window's home monitor.
         let ws = workspace_id.to_string();
-        let native = Dispatch::call(DispatchType::Custom(
-            "focusworkspaceoncurrentmonitor",
-            &ws,
-        ))
-        .and_then(|()| {
-            Dispatch::call(DispatchType::FocusWindow(WindowIdentifier::Address(
-                Address::new(id.clone()),
-            )))
-        });
+        let native = Dispatch::call(DispatchType::Custom("focusworkspaceoncurrentmonitor", &ws))
+            .and_then(|()| {
+                Dispatch::call(DispatchType::FocusWindow(WindowIdentifier::Address(
+                    Address::new(id.clone()),
+                )))
+            });
 
         if native.is_err() {
             eval_lua(&focus_window_lua(workspace_id, &id));
