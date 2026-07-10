@@ -596,12 +596,26 @@ impl Module<gtk::Box> for WorkspacesModule {
                         }
                     }
                     WorkspaceUpdate::Windows { id, windows } if has_initialized => {
-                        if self.show_window_icons
-                            && let Some(button) = button_map
-                                .get(&Identifier::Id(id))
-                                .or_else(|| button_map.find_button_by_id(id))
-                        {
-                            button.set_windows(&windows);
+                        if self.show_window_icons {
+                            let button =
+                                if let Some(button) = button_map.get_mut(&Identifier::Id(id)) {
+                                    Some(button)
+                                } else {
+                                    button_map.find_button_by_id_mut(id)
+                                };
+                            if let Some(button) = button {
+                                button.set_windows(&windows);
+                            }
+                        }
+                    }
+                    WorkspaceUpdate::WindowFocusChanged { address } if has_initialized => {
+                        // Update the highlight on every button in place: focus
+                        // leaving one workspace's window and landing on another
+                        // touches two buttons, and only the affected icons change.
+                        if self.show_window_icons {
+                            for button in button_map.values() {
+                                button.set_focused_window(address.as_deref());
+                            }
                         }
                     }
                     WorkspaceUpdate::Unknown if has_initialized => {
