@@ -14,7 +14,7 @@ use gtk::{Button, Label, PopoverMenu};
 use std::path::PathBuf;
 use system_tray::client::ActivateRequest;
 use system_tray::item::{IconPixmap, Status, StatusNotifierItem, Tooltip};
-use system_tray::menu::ToggleState;
+use system_tray::menu::{MenuDiff, ToggleState};
 use tokio::sync::mpsc;
 use tracing::{debug, error, trace};
 
@@ -29,6 +29,10 @@ pub(crate) struct TrayMenu {
     tx: mpsc::Sender<UiEvent>,
     path: Option<String>,
     address: String,
+
+    /// The last full menu model received, retained so incremental
+    /// [`MenuDiff`]s (post-click property changes) have something to patch.
+    menu: Option<system_tray::menu::TrayMenu>,
 
     pub title: Option<String>,
     pub icon_name: Option<String>,
@@ -217,6 +221,7 @@ impl TrayMenu {
             icon_pixmap: item.icon_pixmap,
             path: None,
             address: address.to_owned(),
+            menu: None,
         }
     }
 
@@ -298,7 +303,35 @@ impl TrayMenu {
         self.path = Some(menu.to_owned());
     }
 
-    pub fn set_menu_widget(&self, tray_menu: &system_tray::menu::TrayMenu) {
+    /// Replaces the menu with a freshly received full model and repaints.
+    pub fn set_menu_widget(&mut self, tray_menu: &system_tray::menu::TrayMenu) {
+        self.menu = Some(tray_menu.clone());
+        self.build_menu_widget();
+    }
+
+    /// Applies incremental dbusmenu property updates to the retained model and
+    /// repaints, so post-click changes (a moved radio selection, a new label)
+    /// become visible without the caller re-sending the whole menu.
+    pub fn apply_menu_diff(&mut self, diffs: &[MenuDiff]) {
+        match self.menu.as_mut() {
+            Some(menu) => super::diff::apply_menu_diffs(&mut menu.submenus, diffs),
+            None => {
+                // A diff arrived before any full menu — nothing to patch.
+                trace!("received menu diff with no menu to apply it to");
+                return;
+            }
+        }
+
+        self.build_menu_widget();
+    }
+
+    /// Rebuilds the popover's menu model, action group, and shortcuts from the
+    /// retained menu model.
+    fn build_menu_widget(&self) {
+        let Some(tray_menu) = self.menu.as_ref() else {
+            return;
+        };
+
         debug!("set menu");
 
         let action_group = SimpleActionGroup::new();
