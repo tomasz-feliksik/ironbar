@@ -739,3 +739,27 @@ where
         }
     }
 }
+
+#[cfg(all(test, feature = "workspaces+hyprland"))]
+mod tests {
+    use super::{focus_window_arg, focus_workspace_here_arg};
+
+    // These arguments are Lua source evaluated by the compositor, not Rust the
+    // compiler can check. A typo does not fail the build and does not raise an
+    // error at the call site — the dispatch simply does nothing, which is the
+    // failure mode the Lua-config-provider bug (#1548) presented as. Pin the
+    // exact strings.
+
+    #[test]
+    fn focus_workspace_here_arg_pins_the_current_monitor() {
+        assert_eq!(
+            focus_workspace_here_arg(4),
+            "{workspace=\"4\",on_current_monitor=true}"
+        );
+    }
+
+    #[test]
+    fn focus_window_arg_addresses_the_window() {
+        assert_eq!(focus_window_arg("0x55c0"), "{window=\"address:0x55c0\"}");
+    }
+}

@@ -690,4 +690,27 @@ mod tests {
             ("{name}".to_string(), "{label}".to_string())
         );
     }
+
+    #[test]
+    fn window_icon_options_default_off() {
+        let module: WorkspacesModule =
+            serde_json::from_str("{}").expect("failed to deserialize defaults");
+        assert!(!module.show_window_icons);
+        assert_eq!(module.window_icon_size, 16);
+        assert!(!module.dedupe_window_icons);
+    }
+
+    #[test]
+    fn window_icon_options_parse() {
+        let json = r#"{
+            "show_window_icons": true,
+            "window_icon_size": 24,
+            "dedupe_window_icons": true
+        }"#;
+        let module: WorkspacesModule =
+            serde_json::from_str(json).expect("failed to deserialize window icon options");
+        assert!(module.show_window_icons);
+        assert_eq!(module.window_icon_size, 24);
+        assert!(module.dedupe_window_icons);
+    }
 }

@@ -8,7 +8,7 @@ use glib::signal::SignalHandlerId;
 use gtk::Button as GtkButton;
 use gtk::prelude::*;
 use gtk::{ContentFit, Orientation, Picture};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -99,30 +99,11 @@ impl Button {
             windows_box.remove(&child);
         }
 
-        // App ids that have a focused window — so a deduped icon still
-        // highlights when any of that app's windows is the active one.
-        let focused_apps: HashSet<&str> = windows
-            .iter()
-            .filter(|w| w.focused)
-            .map(|w| w.app_id.as_str())
-            .collect();
-
-        let mut seen = HashSet::new();
-        for window in windows {
-            if self.dedupe_window_icons && !seen.insert(window.app_id.as_str()) {
-                continue;
-            }
-
+        for icon in resolve_window_icons(windows, self.dedupe_window_icons) {
             let picture = Picture::builder().content_fit(ContentFit::ScaleDown).build();
             picture.add_css_class("window-icon");
             picture.set_size_request(self.window_icon_size, self.window_icon_size);
-            // Highlight the focused window (or, when deduped, the app that owns it).
-            let is_focused = if self.dedupe_window_icons {
-                focused_apps.contains(window.app_id.as_str())
-            } else {
-                window.focused
-            };
-            if is_focused {
+            if icon.focused {
                 picture.add_css_class("focused");
             }
 
@@ -132,13 +113,13 @@ impl Button {
             // does not also fire.
             let gesture = gtk::GestureClick::new();
             let tx = self.tx.clone();
-            let window_id = window.id.clone();
+            let address = icon.address.clone();
             let workspace_id = self.workspace_id;
             gesture.connect_pressed(move |gesture, _, _, _| {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
                 tx.send_spawn(WorkspaceMessage::FocusWindow {
                     workspace_id,
-                    address: window_id.clone(),
+                    address: address.clone(),
                 });
             });
             picture.add_controller(gesture);
@@ -146,7 +127,7 @@ impl Button {
             windows_box.append(&picture);
 
             let provider = self.image_provider.clone();
-            let app_id = window.app_id.clone();
+            let app_id = icon.app_id.clone();
             let size = self.window_icon_size;
             let pic = picture.clone();
             glib::spawn_future_local(async move {
@@ -229,5 +210,98 @@ impl Button {
 
     pub fn set_monitor(&mut self, monitor: &str) {
         self.monitor = monitor.to_string();
+    }
+}
+
+/// A window icon to render inside a workspace button.
+#[derive(Debug, PartialEq, Eq)]
+struct ResolvedIcon {
+    app_id: String,
+    /// Address of the window to focus when the icon is clicked. When deduped,
+    /// this is the first window of the app.
+    address: String,
+    focused: bool,
+}
+
+/// Resolves the window icons to render for a workspace.
+///
+/// Without dedupe: one icon per window, in order, each with its own focus state
+/// and address. With dedupe: one icon per distinct app id (first occurrence
+/// wins for order and click target), focused if ANY window of that app is
+/// focused.
+fn resolve_window_icons(windows: &[WorkspaceWindow], dedupe: bool) -> Vec<ResolvedIcon> {
+    if !dedupe {
+        return windows
+            .iter()
+            .map(|w| ResolvedIcon {
+                app_id: w.app_id.clone(),
+                address: w.id.clone(),
+                focused: w.focused,
+            })
+            .collect();
+    }
+
+    let mut icons: Vec<ResolvedIcon> = Vec::new();
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    for w in windows {
+        if let Some(&i) = index.get(w.app_id.as_str()) {
+            if w.focused {
+                icons[i].focused = true;
+            }
+        } else {
+            index.insert(w.app_id.as_str(), icons.len());
+            icons.push(ResolvedIcon {
+                app_id: w.app_id.clone(),
+                address: w.id.clone(),
+                focused: w.focused,
+            });
+        }
+    }
+    icons
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_window_icons;
+    use crate::clients::compositor::WorkspaceWindow;
+
+    fn win(app: &str, addr: &str, focused: bool) -> WorkspaceWindow {
+        WorkspaceWindow {
+            id: addr.to_string(),
+            app_id: app.to_string(),
+            focused,
+        }
+    }
+
+    #[test]
+    fn no_dedupe_keeps_every_window_in_order() {
+        let windows = vec![
+            win("firefox", "0x1", false),
+            win("firefox", "0x2", true),
+            win("kitty", "0x3", false),
+        ];
+        let icons = resolve_window_icons(&windows, false);
+        assert_eq!(icons.len(), 3);
+        assert_eq!(icons[0].address, "0x1");
+        assert!(icons[1].focused);
+        assert_eq!(icons[2].app_id, "kitty");
+    }
+
+    #[test]
+    fn dedupe_collapses_apps_keeps_first_address_and_any_focus() {
+        let windows = vec![
+            win("firefox", "0x1", false),
+            win("firefox", "0x2", true),
+            win("kitty", "0x3", false),
+        ];
+        let icons = resolve_window_icons(&windows, true);
+        assert_eq!(icons.len(), 2);
+        // First firefox window is the click target,
+        assert_eq!(icons[0].app_id, "firefox");
+        assert_eq!(icons[0].address, "0x1");
+        // but it is focused because a later firefox window is focused.
+        assert!(icons[0].focused);
+        assert_eq!(icons[1].app_id, "kitty");
+        assert!(!icons[1].focused);
     }
 }
