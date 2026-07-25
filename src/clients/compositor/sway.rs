@@ -37,7 +37,7 @@ impl super::WorkspaceClient for Client {
         });
     }
 
-    fn focus_window(&self, _id: String) {
+    fn focus_window(&self, _workspace_id: i64, _id: String) {
         // The Sway backend does not emit per-workspace window icons
         // (WorkspaceUpdate::Windows), so this is never called in practice.
         tracing::warn!("focus_window is not supported on the Sway backend");

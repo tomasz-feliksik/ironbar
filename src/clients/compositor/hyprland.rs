@@ -529,11 +529,33 @@ impl super::WorkspaceClient for Client {
         }
     }
 
-    fn focus_window(&self, id: String) {
-        let identifier = WindowIdentifier::Address(Address::new(id.clone()));
+    fn focus_window(&self, workspace_id: i64, id: String) {
+        // Bring the window's workspace onto the monitor the icon was clicked on
+        // FIRST, then focus the window — focusing the window alone ignores the
+        // current monitor and jumps to the window's home monitor.
+        let res = if self.use_lua_dispatch {
+            Dispatch::call(DispatchType::Custom(
+                "hl.dsp.focus",
+                &focus_workspace_here_arg(workspace_id),
+            ))
+            .and_then(|()| {
+                Dispatch::call(DispatchType::Custom("hl.dsp.focus", &focus_window_arg(&id)))
+            })
+        } else {
+            let workspace = workspace_id.to_string();
+            Dispatch::call(DispatchType::Custom(
+                "focusworkspaceoncurrentmonitor",
+                &workspace,
+            ))
+            .and_then(|()| {
+                Dispatch::call(DispatchType::FocusWindow(WindowIdentifier::Address(
+                    Address::new(id.clone()),
+                )))
+            })
+        };
 
-        if let Err(e) = Dispatch::call(DispatchType::FocusWindow(identifier)) {
-            error!("Couldn't focus window '{id}': {e:#}");
+        if let Err(e) = res {
+            error!("Couldn't focus window '{id}' on workspace '{workspace_id}': {e:#}");
         }
     }
 
@@ -622,6 +644,21 @@ impl BindModeClient for Client {
     fn subscribe(&self) -> super::Result<Receiver<BindModeUpdate>> {
         Ok(self.bindmode.tx.subscribe())
     }
+}
+
+/// Builds the `hl.dsp.focus` argument that pulls a workspace onto the *current*
+/// monitor, the Lua-config-provider equivalent of the legacy
+/// `focusworkspaceoncurrentmonitor` dispatcher.
+#[cfg(feature = "workspaces+hyprland")]
+fn focus_workspace_here_arg(workspace_id: i64) -> String {
+    format!("{{workspace=\"{workspace_id}\",on_current_monitor=true}}")
+}
+
+/// Builds the `hl.dsp.focus` argument that focuses a window by address, the
+/// Lua-config-provider equivalent of the legacy `focuswindow` dispatcher.
+#[cfg(feature = "workspaces+hyprland")]
+fn focus_window_arg(address: &str) -> String {
+    format!("{{window=\"address:{address}\"}}")
 }
 
 #[cfg(feature = "workspaces+hyprland")]

@@ -133,9 +133,13 @@ impl Button {
             let gesture = gtk::GestureClick::new();
             let tx = self.tx.clone();
             let window_id = window.id.clone();
+            let workspace_id = self.workspace_id;
             gesture.connect_pressed(move |gesture, _, _, _| {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                tx.send_spawn(WorkspaceMessage::FocusWindow(window_id.clone()));
+                tx.send_spawn(WorkspaceMessage::FocusWindow {
+                    workspace_id,
+                    address: window_id.clone(),
+                });
             });
             picture.add_controller(gesture);
 

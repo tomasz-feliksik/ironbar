@@ -236,7 +236,9 @@ pub enum WorkspaceMessage {
     /// Focus a workspace by id (workspace button click).
     FocusWorkspace(i64),
     /// Focus a window by compositor address (window icon click).
-    FocusWindow(String),
+    /// `workspace_id` is the workspace the window lives on, so it can be
+    /// brought onto the clicked monitor before focusing.
+    FocusWindow { workspace_id: i64, address: String },
 }
 
 #[derive(Debug, Clone)]
@@ -352,7 +354,10 @@ impl Module<gtk::Box> for WorkspacesModule {
             while let Some(message) = rx.recv().await {
                 match message {
                     WorkspaceMessage::FocusWorkspace(id) => client.focus(id),
-                    WorkspaceMessage::FocusWindow(id) => client.focus_window(id),
+                    WorkspaceMessage::FocusWindow {
+                        workspace_id,
+                        address,
+                    } => client.focus_window(workspace_id, address),
                 }
             }
 
