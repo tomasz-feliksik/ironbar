@@ -34,6 +34,11 @@ pub(crate) struct TrayMenu {
     /// [`MenuDiff`]s (post-click property changes) have something to patch.
     menu: Option<system_tray::menu::TrayMenu>,
 
+    /// The shortcut controller currently attached to the widget, retained so
+    /// the next rebuild can detach it — `add_controller` appends, and nothing
+    /// else ever removes.
+    shortcut_controller: Option<ShortcutController>,
+
     pub title: Option<String>,
     pub icon_name: Option<String>,
     pub icon_theme_path: Option<PathBuf>,
@@ -222,6 +227,7 @@ impl TrayMenu {
             path: None,
             address: address.to_owned(),
             menu: None,
+            shortcut_controller: None,
         }
     }
 
@@ -327,7 +333,7 @@ impl TrayMenu {
 
     /// Rebuilds the popover's menu model, action group, and shortcuts from the
     /// retained menu model.
-    fn build_menu_widget(&self) {
+    fn build_menu_widget(&mut self) {
         let Some(tray_menu) = self.menu.as_ref() else {
             return;
         };
@@ -343,6 +349,16 @@ impl TrayMenu {
 
         self.popover.set_menu_model(Some(&model));
         self.widget.insert_action_group("menu", Some(&action_group));
+
+        // `insert_action_group` replaces the previous group by name, but
+        // `add_controller` only appends — detach the previous controller or
+        // they accumulate on the widget for the lifetime of the tray item.
+        if let Some(old) = self
+            .shortcut_controller
+            .replace(shortcut_controller.clone())
+        {
+            self.widget.remove_controller(&old);
+        }
         self.widget.add_controller(shortcut_controller);
     }
 
