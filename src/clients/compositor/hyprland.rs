@@ -551,7 +551,11 @@ fn get_hyprland_config_provider() -> std::result::Result<String, Box<dyn std::er
 fn get_workspace_name(name: WorkspaceType) -> String {
     match name {
         WorkspaceType::Regular(name) => name,
-        WorkspaceType::Special(name) => name.unwrap_or_default(),
+        // Rebuild the full server-side name: `Workspaces::get()` reports
+        // special workspaces as "special:<name>" (or "special"), and this
+        // name is used to look workspaces up there.
+        WorkspaceType::Special(Some(name)) => format!("special:{name}"),
+        WorkspaceType::Special(None) => String::from("special"),
     }
 }
 
@@ -590,5 +594,43 @@ where
         } else {
             Self::Hidden
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_workspace_name;
+    use hyprland::shared::WorkspaceType;
+
+    // The IPC query API (`Workspaces::get()`) reports special workspaces under
+    // their full name ("special:scratchpad" / "special"), but hyprland-rs
+    // strips the prefix when parsing event names into `WorkspaceType`.
+    // `get_workspace_name` must rebuild the full name, otherwise the
+    // event-driven `get_workspace` lookup compares "scratchpad" against
+    // "special:scratchpad", finds nothing, and the workspace never reaches
+    // the bar until a restart re-enumerates.
+
+    #[test]
+    fn regular_name_passes_through() {
+        assert_eq!(
+            get_workspace_name(WorkspaceType::Regular(String::from("5"))),
+            "5"
+        );
+    }
+
+    #[test]
+    fn named_special_keeps_prefix() {
+        assert_eq!(
+            get_workspace_name(WorkspaceType::Special(Some(String::from("scratchpad")))),
+            "special:scratchpad"
+        );
+    }
+
+    #[test]
+    fn unnamed_special_maps_to_bare_special() {
+        assert_eq!(
+            get_workspace_name(WorkspaceType::Special(None)),
+            "special"
+        );
     }
 }
